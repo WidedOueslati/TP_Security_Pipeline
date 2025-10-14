@@ -1,0 +1,38 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+*.eggs/
+build/
+dist/
+
+# --- Virtualenv ---
+.venv/
+venv/
+env/
+ENV/
+.venv.bak/
+
+# --- Logs et fichiers temporaires ---
+*.log
+*.tmp
+*.swp
+
+# --- Outils CI/CD ---
+# Rapport Bandit
+bandit_report.json
+# Dossiers temporaires Jenkins
+workspace/
+.jenkins/
+
+# --- OS files ---
+.DS_Store
+Thumbs.db
+
+# --- IDEs ---
+.vscode/
+.idea/
+*.iml
