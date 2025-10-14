@@ -45,10 +45,7 @@ pipeline {
         stage('Build Artifact') {
             steps {
                 echo 'Construction du build...'
-                sh '''
-                    . venv/bin/activate
-                    python -m zipfile -c build.zip app.py requirements.txt tests
-                '''
+                sh 'zip -r build.zip app.py requirements.txt tests'
             }
         }
 
