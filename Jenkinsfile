@@ -12,22 +12,32 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 echo 'Installation des dépendances...'
-                sh 'pip install -r requirements.txt'
+                sh '''
+                    python3 -m venv venv
+                    . venv/bin/activate
+                    pip install --upgrade pip
+                    pip install -r requirements.txt
+                '''
             }
         }
 
         stage('Static Code Analysis (SAST)') {
             steps {
                 echo 'Analyse de sécurité avec Bandit...'
-                sh 'bandit -r . || true' 
-                
+                sh '''
+                    . venv/bin/activate
+                    bandit -r . || true
+                '''
             }
         }
 
         stage('Run Tests') {
             steps {
                 echo 'Exécution des tests unitaires...'
-                sh 'pytest --maxfail=1 --disable-warnings -q'
+                sh '''
+                    . venv/bin/activate
+                    pytest --maxfail=1 --disable-warnings -q
+                '''
             }
         }
 
