@@ -36,3 +36,14 @@ Thumbs.db
 .vscode/
 .idea/
 *.iml
+
+
+*.pyc
+*.db
+*.log
+*.pid
+.pytest_cache/
+htmlcov/
+.coverage
+*-report.*
+.DS_Store

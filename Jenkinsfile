@@ -1,17 +1,22 @@
 pipeline {
     agent any
-
+    
+    environment {
+        PYTHON_VERSION = '3.9'
+        APP_PORT = '5000'
+    }
+    
     stages {
         stage('Checkout') {
             steps {
-                echo 'Clonage du dépôt...'
+                echo ' Récupération du code source...'
                 checkout scm
             }
         }
-
-        stage('Install Dependencies') {
+        
+        stage('Setup Python Environment') {
             steps {
-                echo 'Installation des dépendances...'
+                echo ' Configuration de l\'environnement Python...'
                 sh '''
                     python3 -m venv venv
                     . venv/bin/activate
@@ -20,47 +25,32 @@ pipeline {
                 '''
             }
         }
-
-        stage('Static Code Analysis (SAST)') {
+        
+        stage('Unit Tests') {
             steps {
-                echo 'Analyse de sécurité avec Bandit...'
+                echo ' Exécution des tests unitaires...'
                 sh '''
                     . venv/bin/activate
-                    bandit -r . || true
+                    pytest test_app.py -v --cov=app --cov-report=xml --cov-report=html
                 '''
-            }
-        }
-
-        stage('Run Tests') {
-            steps {
-                echo 'Exécution des tests unitaires...'
-                sh '''
-                    . venv/bin/activate
-                    pytest --maxfail=1 --disable-warnings -q || true
-                '''
-            }
-        }
-
-
-        stage('Build Artifact') {
-            steps {
-                echo 'Construction du build...'
-                sh 'zip -r build.zip app.py requirements.txt tests'
-            }
-        }
-
-        stage('Deploy (Simulation)') {
-            steps {
-                echo 'Déploiement simulé...'
-                sh 'echo "Déploiement réussi (simulation) !"'
             }
         }
     }
-
+    
     post {
         always {
-            echo 'Pipeline terminé — nettoyage...'
-            cleanWs()
+            echo ' Nettoyage...'
+            sh '''
+                rm -rf venv
+            '''
+        }
+        
+        success {
+            echo ' Pipeline réussi !'
+        }
+        
+        failure {
+            echo ' Pipeline échoué !'
         }
     }
 }

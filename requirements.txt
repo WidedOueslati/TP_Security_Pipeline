@@ -1,2 +1,8 @@
-pytest
-bandit
+Flask==2.3.0
+Werkzeug==2.3.0
+pytest==7.3.1
+pytest-cov==4.1.0
+requests==2.31.0
+
+# Dépendance vulnérable intentionnelle pour SCA
+urllib3==1.26.5
