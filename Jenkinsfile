@@ -14,15 +14,24 @@ pipeline {
             }
         }
 
-        stage('Setup Python Environment') {
+        stage('Setup Python Environment & Tools') {
             steps {
-                echo 'Configuration de l\'environnement Python...'
+                echo 'Configuration de l\'environnement Python et installation outils (bandit, safety, jq)...'
                 sh '''
+                    set -e
                     python3 -m venv venv
                     . venv/bin/activate
                     pip install --upgrade pip
                     pip install -r requirements.txt
-                    pip install bandit
+                    pip install bandit safety    # installe Bandit et Safety
+                    # vérifie jq (si absent, tenter d'installer via apt-get si possible)
+                    if ! command -v jq >/dev/null 2>&1; then
+                        echo "jq non trouvé - tentative d'installation (si l'agent le permet)..."
+                        if [ -f /etc/debian_version ]; then
+                            sudo apt-get update && sudo apt-get install -y jq || true
+                        fi
+                    fi
+                    echo "Outils installés : $(bandit --version 2>/dev/null || echo 'bandit?') / $(safety check --version 2>/dev/null || echo 'safety?') / jq: $(jq --version 2>/dev/null || echo 'jq?')"
                 '''
             }
         }
@@ -39,45 +48,93 @@ pipeline {
 
         stage('SAST Scan (Bandit)') {
             steps {
-                echo 'Analyse SAST avec Bandit...'
+                echo 'Lancement Bandit (génère bandit-report.json)...'
                 sh '''
+                    set +e           # important : ne pas faire échouer immédiatement la step si bandit renvoie >0
                     . venv/bin/activate
-                    bandit -r app -f json -o bandit-report.json || true
+                    bandit -r app -f json -o bandit-report.json
+                    BANDIT_EXIT=$?
+                    echo "Bandit exit code: $BANDIT_EXIT" > bandit-exit-code.txt
+                    set -e
                 '''
+            }
+            // archiveArtifacts can help later to download reports from Jenkins UI
+            post {
+                always {
+                    archiveArtifacts artifacts: 'bandit-report.json, bandit-exit-code.txt', allowEmptyArchive: true
+                }
             }
         }
 
-        stage('SCA Scan (Dependency-Check)') {
+        stage('SCA Scan (Safety)') {
             steps {
-                echo 'Analyse SCA avec OWASP Dependency-Check...'
+                echo 'Lancement Safety (génère safety-report.json)...'
                 sh '''
-                    dependency-check.sh --project "FlaskApp" --scan . --format "HTML" --out dependency-check-report.html || true
+                    set +e
+                    . venv/bin/activate
+                    # safety peut lire requirements.txt ; on force la sortie JSON dans un fichier
+                    safety check --full-report --file=requirements.txt --json > safety-report.json 2>/dev/null
+                    SAFETY_EXIT=$?
+                    echo "SAFETY_EXIT=$SAFETY_EXIT" > safety-exit-code.txt
+                    set -e
                 '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'safety-report.json, safety-exit-code.txt', allowEmptyArchive: true
+                }
             }
         }
 
         stage('Security Validation') {
             steps {
-                echo 'Validation des résultats de sécurité...'
+                echo 'Validation centralisée des rapports Bandit & Safety...'
                 sh '''
-                    # Vérification de la sortie Bandit pour vulnérabilités élevées
-                    CRITICALS=$(grep -c '"issue_severity": "HIGH"' bandit-report.json || true)
-                    if [ "$CRITICALS" -gt 0 ]; then
-                        echo " Vulnérabilités critiques détectées par Bandit."
-                        exit 1
+                    set -e
+                    # --- Bandit validation ---
+                    if [ -f bandit-report.json ]; then
+                        # compter issues HIGH/CRITICAL dans bandit-report.json (structure Bandit standard)
+                        HIGH_COUNT=$(jq '[.results[] | select(.issue_severity=="HIGH" or .issue_severity=="CRITICAL")] | length' bandit-report.json || echo 0)
+                    else
+                        echo "Attention: bandit-report.json introuvable"
+                        HIGH_COUNT=0
                     fi
 
-                    # Vérification que le rapport Dependency-Check ne contient pas de vulnérabilités critiques
-                    if grep -q "CRITICAL" dependency-check-report.html; then
-                        echo " Vulnérabilités critiques détectées par Dependency-Check."
-                        exit 1
+                    # --- Safety validation ---
+                    # Safety JSON format: on cherche si la liste 'vulnerabilities' existe et compter
+                    if [ -f safety-report.json ]; then
+                        # essayer plusieurs chemins possibles selon version : .vulnerabilities ou .vulnerabilities[]
+                        # on utilise try/capture pour éviter erreur jq si la clé n'existe pas
+                        SAF_VULNS=$(jq 'if .vulnerabilities then .vulnerabilities | length else 0 end' safety-report.json || echo 0)
+                    else
+                        echo "Attention: safety-report.json introuvable"
+                        SAF_VULNS=0
                     fi
 
-                    echo " Aucun problème critique détecté."
+                    echo "Bandit HIGH/CRITICAL issues: $HIGH_COUNT"
+                    echo "Safety detected vulnerabilities: $SAF_VULNS"
+
+                    # Politique : échouer si Bandit signale HIGH/CRITICAL ou si Safety trouve >=1 vulnérabilité
+                    if [ "$HIGH_COUNT" -gt 0 ] || [ "$SAF_VULNS" -gt 0 ]; then
+                        echo "Vulnérabilités critiques/hautes détectées — échec du pipeline."
+                        # On peut afficher un extrait des rapports pour faciliter debug
+                        if [ "$HIGH_COUNT" -gt 0 ]; then
+                            echo "Extraits Bandit (High/Critical):"
+                            jq '.results[] | select(.issue_severity=="HIGH" or .issue_severity=="CRITICAL") | {filename: .filename, test_name: .test_name, issue_text: .issue_text}' bandit-report.json || true
+                        fi
+                        if [ "$SAF_VULNS" -gt 0 ]; then
+                            echo "Extraits Safety (quelques vulnérabilités):"
+                            jq '.vulnerabilities[] | {package_name: .package_name, affected_versions: .affected_versions, advisory: .advisory}' safety-report.json | head -n 200 || true
+                        fi
+
+                        exit 1
+                    else
+                        echo "Aucun problème critique détecté par Bandit/Safety."
+                    fi
                 '''
             }
         }
-    }
+    } // stages
 
     post {
         always {
@@ -88,7 +145,7 @@ pipeline {
             echo 'Pipeline réussi (tests + sécurité OK) !'
         }
         failure {
-            echo 'Pipeline échoué à cause des vulnérabilités ou tests !'
+            echo 'Pipeline échoué (problèmes détectés).'
         }
     }
 }
