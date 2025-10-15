@@ -52,7 +52,7 @@ pipeline {
                 sh '''
                     set +e           # important : ne pas faire échouer immédiatement la step si bandit renvoie >0
                     . venv/bin/activate
-                    bandit -r app -f json -o bandit-report.json
+                    bandit -r . -f json -o bandit-report.json
                     BANDIT_EXIT=$?
                     echo "Bandit exit code: $BANDIT_EXIT" > bandit-exit-code.txt
                     set -e
