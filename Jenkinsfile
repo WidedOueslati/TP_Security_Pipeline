@@ -160,13 +160,15 @@ pipeline {
                     wapiti -u http://127.0.0.1:5000 --flush-attacks --flush-session --max-scan-time 1 -f json -o /dev/null || true
 
                     # targeted scan: crawl + endpoints + modules agressifs
-                    wapiti -u http://127.0.0.1:5000 \
-                        --endpoint 'http://127.0.0.1:5000/login' --data '{"username":"admin","password":"test"}' -H 'Content-Type: application/json' \
-                        --endpoint 'http://127.0.0.1:5000/calculate' --data '{"expression":"2+2"}' -H 'Content-Type: application/json' \
-                        --endpoint 'http://127.0.0.1:5000/user/1' \
-                        -m xss,sql,exec,permanentxss,ssrf,http_headers,upload \
-                        -d 3 --max-scan-time 300 --flush-attacks --flush-session \
-                        -f json -o wapiti-report.json || true
+                    wapiti -u 'http://127.0.0.1:5000' \
+                    --endpoint 'http://127.0.0.1:5000/user/1%27%20OR%20%271%27=%271' \
+                    --endpoint 'http://127.0.0.1:5000/users' \
+                    --endpoint 'http://127.0.0.1:5000/login' --data '{"username":"admin'\'' OR '\''1'\''='\''1","password":"anything"}' -H 'Content-Type: application/json' \
+                    --endpoint 'http://127.0.0.1:5000/search?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E' \
+                    --endpoint 'http://127.0.0.1:5000/calculate' --data '{"expression":"2+2"}' -H 'Content-Type: application/json' \
+                    -m xss,sql,exec,permanentxss,http_headers,upload \
+                    -d 3 --max-scan-time 300 --flush-attacks --flush-session \
+                    -f json -o wapiti-report.json || true
 
                     ls -l wapiti-report.json || true
 
