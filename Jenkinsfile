@@ -168,7 +168,7 @@ pipeline {
                         -Tuning 123456789abc \
                         -Format json \
                         -output nikto-report.json \
-                        -nointeractive || true
+                        -nointeractive 
 
                     # Générer aussi un rapport HTML pour visualisation
                     perl nikto/program/nikto.pl \
@@ -176,7 +176,7 @@ pipeline {
                         -Tuning 123456789abc \
                         -Format html \
                         -output nikto-report.html \
-                        -nointeractive || true
+                        -nointeractive
 
                     # Vérifier que le rapport existe
                     ls -lh nikto-report.json nikto-report.html || true
@@ -186,25 +186,18 @@ pipeline {
                     if [ -f nikto-report.json ]; then
                         # Filtrer les vulnérabilités critiques/high
                         HIGH_COUNT=$(jq -r '
-                            [
-                                .[] // empty |
+                            [.[]? |
                                 select(
-                                    (.OSVDB? != null and .OSVDB != "0") or
-                                    (.id? // "" | tostring | length > 0) or
-                                    (.msg? // .description? // "" | ascii_downcase | 
-                                        contains("sql injection") or
-                                        contains("command injection") or
+                                    (.msg // "" | ascii_downcase |
+                                        contains("strict-transport-security") or
+                                        contains("content-security-policy") or
                                         contains("code execution") or
-                                        contains("remote code") or
-                                        contains("arbitrary file") or
-                                        contains("directory traversal") or
-                                        contains("authentication bypass") or
-                                        contains("default credentials")
+                                        contains("sql injection")
                                     )
                                 )
                             ] | length
                         ' nikto-report.json 2>/dev/null || echo 0)
-                        
+
                         TOTAL_COUNT=$(jq -r 'length' nikto-report.json 2>/dev/null || echo 0)
                         
                         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
