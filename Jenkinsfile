@@ -186,10 +186,10 @@ pipeline {
                     if [ -f nikto-report.json ]; then
                         # Filtrer les vulnérabilités critiques/high
                         HIGH_COUNT=$(jq -r '
-                            [.[]? |
+                            [.[].vulnerabilities[]? |
                                 select(
                                 (.msg // "" | ascii_downcase |
-                                    test("strict-transport-security|content-security-policy|x-content-type-options|referrer-policy|permissions-policy")
+                                    test("content-security-policy|strict-transport-security|x-content-type-options|referrer-policy|permissions-policy")
                                 )
                                 )
                             ] | length
