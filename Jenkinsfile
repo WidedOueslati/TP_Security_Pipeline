@@ -156,7 +156,16 @@ pipeline {
                     . venv/bin/activate
 
                     # Scanner l'application Flask
-                    wapiti -u http://127.0.0.1:5000 -f json -o wapiti-report.json
+                    # Lancer Wapiti : base crawl + endpoints POST JSON ciblés + modules agressifs
+                    wapiti -u http://127.0.0.1:5000 \
+                        --endpoint http://127.0.0.1:5000/login --data '{"username":"admin","password":"test"}' -H "Content-Type: application/json" \
+                        --endpoint http://127.0.0.1:5000/calculate --data '{"expression":"2+2"}' -H "Content-Type: application/json" \
+                        -m xss,sql,exec,permanentxss,ssrf,http_headers,upload \
+                        -d 3 --max-scan-time 300 \
+                        -f json -o wapiti-report.json || true
+
+                    # Archiver le rapport JSON
+                    ls -l wapiti-report.json || true
 
                     # Compter le nombre de vulnérabilités HIGH/CRITICAL
                     HIGH_COUNT=$(jq -r '
