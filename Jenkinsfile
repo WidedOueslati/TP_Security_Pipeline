@@ -21,9 +21,17 @@ pipeline {
                     set -e
                     python3 -m venv venv
                     . venv/bin/activate
-                    pip install wapiti3
+                    
                     pip install --upgrade pip
                     pip install -r requirements.txt
+                    # Installer Nikto (scan de sécurité)
+                    if [ ! -d "nikto" ]; then
+                        echo "Installation de Nikto..."
+                        git clone https://github.com/sullo/nikto.git
+                    else
+                        echo "Nikto déjà installé, mise à jour..."
+                        cd nikto && git pull && cd ..
+                    fi
                     pip install bandit safety    # installe Bandit et Safety
                     # vérifie jq (si absent, tenter d'installer via apt-get si possible)
                     if ! command -v jq >/dev/null 2>&1; then
@@ -149,58 +157,90 @@ pipeline {
                 '''
             }
         }
-        stage('DAST Scan (Wapiti)') {
+        
+        stage('DAST Scan (Nikto)') {
             steps {
-                echo 'Analyse dynamique avec Wapiti...'
+                echo 'Analyse dynamique avec Nikto...'
                 sh '''
-                    . venv/bin/activate
+                    # Scanner l'application Flask avec Nikto
+                    perl nikto/program/nikto.pl \
+                        -h http://127.0.0.1:5000 \
+                        -Tuning 123456789abc \
+                        -Format json \
+                        -output nikto-report.json \
+                        -nointeractive || true
 
-                    # Scanner l'application Flask
-                    # flush previous state to avoid "previously attacked" skipping
-                    wapiti -u http://127.0.0.1:5000 --flush-attacks --flush-session --max-scan-time 1 -f json -o /dev/null || true
+                    # Générer aussi un rapport HTML pour visualisation
+                    perl nikto/program/nikto.pl \
+                        -h http://127.0.0.1:5000 \
+                        -Tuning 123456789abc \
+                        -Format html \
+                        -output nikto-report.html \
+                        -nointeractive || true
 
-                    # targeted scan: crawl + endpoints + modules agressifs
-                    wapiti -u 'http://127.0.0.1:5000' \
-                    --endpoint 'http://127.0.0.1:5000/user/1%27%20OR%20%271%27=%271' \
-                    --endpoint 'http://127.0.0.1:5000/users' \
-                    --endpoint 'http://127.0.0.1:5000/login' --data '{"username":"admin'\'' OR '\''1'\''='\''1","password":"anything"}' -H 'Content-Type: application/json' \
-                    --endpoint 'http://127.0.0.1:5000/search?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E' \
-                    --endpoint 'http://127.0.0.1:5000/calculate' --data '{"expression":"2+2"}' -H 'Content-Type: application/json' \
-                    -m xss,sql,exec,permanentxss,http_headers,upload \
-                    -d 3 --max-scan-time 300 --flush-attacks --flush-session \
-                    -f json -o wapiti-report.json || true
+                    # Vérifier que le rapport existe
+                    ls -lh nikto-report.json nikto-report.html || true
 
-                    ls -l wapiti-report.json || true
+                    # Compter le nombre de vulnérabilités détectées
+                    # Nikto JSON format: liste d'objets avec des vulnérabilités
+                    if [ -f nikto-report.json ]; then
+                        # Filtrer les vulnérabilités critiques/high
+                        HIGH_COUNT=$(jq -r '
+                            [
+                                .[] // empty |
+                                select(
+                                    (.OSVDB? != null and .OSVDB != "0") or
+                                    (.id? // "" | tostring | length > 0) or
+                                    (.msg? // .description? // "" | ascii_downcase | 
+                                        contains("sql injection") or
+                                        contains("command injection") or
+                                        contains("code execution") or
+                                        contains("remote code") or
+                                        contains("arbitrary file") or
+                                        contains("directory traversal") or
+                                        contains("authentication bypass") or
+                                        contains("default credentials")
+                                    )
+                                )
+                            ] | length
+                        ' nikto-report.json 2>/dev/null || echo 0)
+                        
+                        TOTAL_COUNT=$(jq -r 'length' nikto-report.json 2>/dev/null || echo 0)
+                        
+                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        echo "Résultats du scan Nikto:"
+                        echo "   Total de vulnérabilités: $TOTAL_COUNT"
+                        echo "   Vulnérabilités HIGH/CRITICAL: $HIGH_COUNT"
+                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-                    # Compter le nombre de vulnérabilités HIGH/CRITICAL
-                    HIGH_COUNT=$(jq -r '
-                        def is_high:
-                            ( (.level? // .severity? // "") | tostring | ascii_downcase ) == "high";
-                        if .vulnerabilities? then
-                            [ .vulnerabilities[] | select(is_high) ] | length
-                        elif type == "array" then
-                            [ .[] | select(is_high) ] | length
+                        # Bloquer le pipeline si vulnérabilités critiques détectées
+                        if [ $HIGH_COUNT -gt 0 ]; then
+                            echo " ÉCHEC: Vulnérabilités critiques détectées!"
+                            exit 1
                         else
-                            0
-                        end
-                        ' wapiti-report.json 2>/dev/null || echo 0)
-
-                    echo "Wapiti HIGH vulnerabilities: $HIGH_COUNT"
-
-                    # Bloquer le pipeline si vulnérabilités HIGH
-                    if [ $HIGH_COUNT -gt 0 ]; then
-                        echo "Vulnérabilités critiques détectées par Wapiti — échec du pipeline."
+                            echo "Aucune vulnérabilité critique détectée."
+                        fi
+                    else
+                        echo "Fichier nikto-report.json introuvable"
                         exit 1
                     fi
                 '''
             }
             post {
-        always {
-            archiveArtifacts artifacts: 'wapiti-report.json', allowEmptyArchive: true
+                always {
+                    archiveArtifacts artifacts: 'nikto-report.json, nikto-report.html', allowEmptyArchive: true
+                    
+                    // Publier le rapport HTML dans Jenkins
+                    publishHTML([
+                        reportDir: '.',
+                        reportFiles: 'nikto-report.html',
+                        reportName: 'Nikto DAST Report',
+                        keepAll: true,
+                        alwaysLinkToLastBuild: true
+                    ])
+                }
+            }
         }
-    }
-        }
-
         stage('Stop Temporary App') {
             steps {
                 sh '''
