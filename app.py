@@ -125,7 +125,7 @@ def calculate():
     expression = data.get('expression', '')
     
     try:
-        # DANGER : eval() permet l'exécution de code arbitraire
+        # DANGER : eval() 
         result = eval(expression)
         return jsonify({"result": result}), 200
     except Exception as e:

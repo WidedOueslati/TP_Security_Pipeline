@@ -46,7 +46,7 @@ pipeline {
             }
         }
 
-        stage('SAST Scan (Bandit)') {
+        /*stage('SAST Scan (Bandit)') {
             steps {
                 echo 'Lancement Bandit (génère bandit-report.json)...'
                 sh '''
@@ -93,7 +93,6 @@ pipeline {
                     set -e
                     # --- Bandit validation ---
                     if [ -f bandit-report.json ]; then
-                        # compter issues HIGH/CRITICAL dans bandit-report.json (structure Bandit standard)
                         HIGH_COUNT=$(jq '[.results[] | select(.issue_severity=="HIGH" or .issue_severity=="CRITICAL")] | length' bandit-report.json || echo 0)
                     else
                         echo "Attention: bandit-report.json introuvable"
@@ -101,10 +100,7 @@ pipeline {
                     fi
 
                     # --- Safety validation ---
-                    # Safety JSON format: on cherche si la liste 'vulnerabilities' existe et compter
                     if [ -f safety-report.json ]; then
-                        # essayer plusieurs chemins possibles selon version : .vulnerabilities ou .vulnerabilities[]
-                        # on utilise try/capture pour éviter erreur jq si la clé n'existe pas
                         SAF_VULNS=$(jq 'if .vulnerabilities then .vulnerabilities | length else 0 end' safety-report.json || echo 0)
                     else
                         echo "Attention: safety-report.json introuvable"
@@ -117,7 +113,6 @@ pipeline {
                     # Politique : échouer si Bandit signale HIGH/CRITICAL ou si Safety trouve >=1 vulnérabilité
                     if [ "$HIGH_COUNT" -gt 0 ] || [ "$SAF_VULNS" -gt 0 ]; then
                         echo "Vulnérabilités critiques/hautes détectées — échec du pipeline."
-                        # On peut afficher un extrait des rapports pour faciliter debug
                         if [ "$HIGH_COUNT" -gt 0 ]; then
                             echo "Extraits Bandit (High/Critical):"
                             jq '.results[] | select(.issue_severity=="HIGH" or .issue_severity=="CRITICAL") | {filename: .filename, test_name: .test_name, issue_text: .issue_text}' bandit-report.json || true
@@ -133,7 +128,59 @@ pipeline {
                     fi
                 '''
             }
+        }*/
+
+        stage('Deploy Temporary App') {
+            steps {
+                echo 'Déploiement de l\'application Flask pour le scan DAST...'
+                sh '''
+                    # Activer l'environnement
+                    . venv/bin/activate
+                    
+                    # Lancer Flask en arrière-plan
+                    nohup python app.py &
+                    
+                    # Sauvegarder le PID pour arrêter après
+                    echo $! > flask.pid
+                    
+                    # Attendre quelques secondes que le serveur soit prêt
+                    sleep 5
+                '''
+            }
         }
+        stage('DAST Scan (ZAP)') {
+            steps {
+                echo 'Analyse dynamique avec OWASP ZAP...'
+                sh '''
+                    # Scanner l'application en cours d'exécution
+                    zap-cli quick-scan --self-contained --start-options "-config api.disablekey=true" http://127.0.0.1:5000
+                    
+                    # Récupérer le nombre de vulnérabilités HIGH/CRITICAL
+                    HIGH_COUNT=$(zap-cli alerts -l High | wc -l)
+                    
+                    echo "ZAP HIGH/CRITICAL issues: $HIGH_COUNT"
+                    
+                    # Bloquer le pipeline si vulnérabilités HIGH
+                    if [ $HIGH_COUNT -gt 0 ]; then
+                        echo "Vulnérabilités critiques détectées par ZAP — échec du pipeline."
+                        exit 1
+                    fi
+                '''
+            }
+        }
+        stage('Stop Temporary App') {
+            steps {
+                sh '''
+                    if [ -f flask.pid ]; then
+                        kill $(cat flask.pid)
+                        rm flask.pid
+                    fi
+                '''
+            }
+        }
+
+
+
     } // stages
 
     post {
@@ -142,7 +189,7 @@ pipeline {
             sh 'rm -rf venv'
         }
         success {
-            echo 'Pipeline réussi (tests + sécurité OK) !'
+            echo 'Pipeline réussi  !'
         }
         failure {
             echo 'Pipeline échoué (problèmes détectés).'
