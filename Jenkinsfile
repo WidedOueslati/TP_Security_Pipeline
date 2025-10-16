@@ -152,12 +152,8 @@ pipeline {
             steps {
                 echo 'Analyse dynamique avec OWASP ZAP...'
                 sh '''
-                    pipx ensurepath
-                    export PATH="$HOME/.local/bin:$PATH"
-                    pipx install git+https://github.com/Grunny/zap-cli.git
-                    # Scanner l'application en cours d'exécution
-                    zap-cli quick-scan --self-contained --start-options "-config api.disablekey=true" http://127.0.0.1:5000
-                    
+                    docker run -t --rm -v $(pwd):/zap/wrk/:rw owasp/zap2docker-stable \
+                        zap-baseline.py -t http://127.0.0.1:5000 -r zap-report.html
                     # Récupérer le nombre de vulnérabilités HIGH/CRITICAL
                     HIGH_COUNT=$(zap-cli alerts -l High | wc -l)
                     
@@ -170,6 +166,12 @@ pipeline {
                     fi
                 '''
             }
+            post {
+        always {
+            archiveArtifacts artifacts: 'zap-report.html', allowEmptyArchive: true
+        }
+    }
+}
         }
         stage('Stop Temporary App') {
             steps {
