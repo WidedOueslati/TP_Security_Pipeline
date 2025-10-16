@@ -152,12 +152,9 @@ pipeline {
             steps {
                 echo 'Analyse dynamique avec OWASP ZAP...'
                 sh '''
-                    # Install zap-cli every time
-                    pip3 install --user pipx
-                    python3 -m pipx ensurepath
-                    pipx install --force git+https://github.com/Grunny/zap-cli.git
+                    pipx ensurepath
                     export PATH="$HOME/.local/bin:$PATH"
-
+                    pipx install git+https://github.com/Grunny/zap-cli.git
                     # Scanner l'application en cours d'exécution
                     zap-cli quick-scan --self-contained --start-options "-config api.disablekey=true" http://127.0.0.1:5000
                     
