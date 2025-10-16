@@ -46,7 +46,7 @@ pipeline {
             }
         }
 
-        /*stage('SAST Scan (Bandit)') {
+        stage('SAST Scan (Bandit)') {
             steps {
                 echo 'Lancement Bandit (génère bandit-report.json)...'
                 sh '''
@@ -85,7 +85,7 @@ pipeline {
                 }
             }
         }
-
+        
         stage('Security Validation') {
             steps {
                 echo 'Validation centralisée des rapports Bandit & Safety...'
@@ -128,7 +128,7 @@ pipeline {
                     fi
                 '''
             }
-        }*/
+        }
 
         stage('Deploy Temporary App') {
             steps {
@@ -152,6 +152,12 @@ pipeline {
             steps {
                 echo 'Analyse dynamique avec OWASP ZAP...'
                 sh '''
+                    # Install zap-cli every time
+                    pip3 install --user pipx
+                    python3 -m pipx ensurepath
+                    pipx install --force git+https://github.com/Grunny/zap-cli.git
+                    export PATH="$HOME/.local/bin:$PATH"
+
                     # Scanner l'application en cours d'exécution
                     zap-cli quick-scan --self-contained --start-options "-config api.disablekey=true" http://127.0.0.1:5000
                     
