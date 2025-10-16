@@ -230,14 +230,6 @@ pipeline {
                 always {
                     archiveArtifacts artifacts: 'nikto-report.json, nikto-report.html', allowEmptyArchive: true
                     
-                    // Publier le rapport HTML dans Jenkins
-                    publishHTML([
-                        reportDir: '.',
-                        reportFiles: 'nikto-report.html',
-                        reportName: 'Nikto DAST Report',
-                        keepAll: true,
-                        alwaysLinkToLastBuild: true
-                    ])
                 }
             }
         }
