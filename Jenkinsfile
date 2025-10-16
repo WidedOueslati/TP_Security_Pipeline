@@ -188,15 +188,12 @@ pipeline {
                         HIGH_COUNT=$(jq -r '
                             [.[]? |
                                 select(
-                                    (.msg // "" | ascii_downcase |
-                                        contains("strict-transport-security") or
-                                        contains("content-security-policy") or
-                                        contains("code execution") or
-                                        contains("sql injection")
-                                    )
+                                (.msg // "" | ascii_downcase |
+                                    test("strict-transport-security|content-security-policy|x-content-type-options|referrer-policy|permissions-policy")
+                                )
                                 )
                             ] | length
-                        ' nikto-report.json 2>/dev/null || echo 0)
+                            ' nikto-report.json)
 
                         TOTAL_COUNT=$(jq -r 'length' nikto-report.json 2>/dev/null || echo 0)
                         
