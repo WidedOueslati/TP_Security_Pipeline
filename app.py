@@ -4,6 +4,15 @@ import os
 
 app = Flask(__name__)
 
+@app.after_request
+def add_security_headers(response):
+    response.headers['Strict-Transport-Security'] = 'max-age=63072000; includeSubDomains; preload'
+    response.headers['Content-Security-Policy'] = "default-src 'self'"
+    response.headers['Referrer-Policy'] = 'no-referrer'
+    response.headers['Permissions-Policy'] = 'geolocation=(), microphone=()'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    return response
+
 # Configuration
 DATABASE = 'users.db'
 
