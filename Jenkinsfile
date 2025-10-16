@@ -159,7 +159,17 @@ pipeline {
                     wapiti -u http://127.0.0.1:5000 -f json -o wapiti-report.json
 
                     # Compter le nombre de vulnérabilités HIGH/CRITICAL
-                    HIGH_COUNT=$(jq '[.vulnerabilities[] | select(.level=="high")] | length' wapiti-report.json)
+                    HIGH_COUNT=$(jq -r '
+                        def is_high:
+                            ( (.level? // .severity? // "") | tostring | ascii_downcase ) == "high";
+                        if .vulnerabilities? then
+                            [ .vulnerabilities[] | select(is_high) ] | length
+                        elif type == "array" then
+                            [ .[] | select(is_high) ] | length
+                        else
+                            0
+                        end
+                        ' wapiti-report.json 2>/dev/null || echo 0)
 
                     echo "Wapiti HIGH vulnerabilities: $HIGH_COUNT"
 
