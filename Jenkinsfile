@@ -182,7 +182,7 @@ pipeline {
             }
             post {
         always {
-            archiveArtifacts artifacts: 'wapiti-report.html', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'wapiti-report.json', allowEmptyArchive: true
         }
     }
         }
