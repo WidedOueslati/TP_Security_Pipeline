@@ -156,7 +156,7 @@ pipeline {
                     . venv/bin/activate
 
                     # Scanner l'application Flask
-                    venv/bin/wapiti http://127.0.0.1:5000 -f json -o wapiti-report.json
+                    wapiti http://127.0.0.1:5000 -f json -o wapiti-report.json
 
                     # Compter le nombre de vulnérabilités HIGH/CRITICAL
                     HIGH_COUNT=$(jq '[.vulnerabilities[] | select(.level=="high")] | length' wapiti-report.json)
