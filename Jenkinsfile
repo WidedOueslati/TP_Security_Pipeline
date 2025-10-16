@@ -171,7 +171,7 @@ pipeline {
             archiveArtifacts artifacts: 'zap-report.html', allowEmptyArchive: true
         }
     }
-}
+
         }
         stage('Stop Temporary App') {
             steps {
