@@ -148,31 +148,34 @@ pipeline {
                 '''
             }
         }
-        stage('DAST Scan (ZAP)') {
+        stage('DAST Scan (Wapiti)') {
             steps {
-                echo 'Analyse dynamique avec OWASP ZAP...'
+                echo 'Analyse dynamique avec Wapiti...'
                 sh '''
-                    docker run -t --rm -v $(pwd):/zap/wrk/:rw owasp/zap2docker-stable \
-                        zap-baseline.py -t http://127.0.0.1:5000 -r zap-report.html
-                    # Récupérer le nombre de vulnérabilités HIGH/CRITICAL
-                    HIGH_COUNT=$(zap-cli alerts -l High | wc -l)
-                    
-                    echo "ZAP HIGH/CRITICAL issues: $HIGH_COUNT"
-                    
+                    . venv/bin/activate
+
+                    # Scanner l'application Flask
+                    wapiti http://127.0.0.1:5000 -f json -o wapiti-report.json
+
+                    # Compter le nombre de vulnérabilités HIGH/CRITICAL
+                    HIGH_COUNT=$(jq '[.vulnerabilities[] | select(.level=="high")] | length' wapiti-report.json)
+
+                    echo "Wapiti HIGH vulnerabilities: $HIGH_COUNT"
+
                     # Bloquer le pipeline si vulnérabilités HIGH
                     if [ $HIGH_COUNT -gt 0 ]; then
-                        echo "Vulnérabilités critiques détectées par ZAP — échec du pipeline."
+                        echo "Vulnérabilités critiques détectées par Wapiti — échec du pipeline."
                         exit 1
                     fi
                 '''
             }
             post {
         always {
-            archiveArtifacts artifacts: 'zap-report.html', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'wapiti-report.html', allowEmptyArchive: true
         }
     }
-
         }
+
         stage('Stop Temporary App') {
             steps {
                 sh '''
