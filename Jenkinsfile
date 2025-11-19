@@ -143,25 +143,25 @@ pipeline {
             steps {
                 echo 'Déploiement de l\'application Flask pour le scan DAST...'
                 sh '''
-                    # Créer un réseau Docker
-                    docker network create zap-test-network || true
+                    # Activer l'environnement
+                    . venv/bin/activate
                     
-                    # Construire l'image Flask si pas déjà fait
-                    docker build -t flask-app:test .
+                    # Créer un script Python temporaire
+                    cat > run_flask.py << 'EOF'
+        from app import app
+        if __name__ == '__main__':
+            app.run(host='0.0.0.0', port=5000, debug=False)
+        EOF
                     
-                    # Lancer Flask dans un conteneur
-                    docker run -d \
-                        --name flask-test-app \
-                        --network zap-test-network \
-                        -p 5000:5000 \
-                        flask-app:test
+                    # Lancer Flask
+                    nohup python run_flask.py > flask.log 2>&1 &
+                    echo $! > flask.pid
                     
-                    # Attendre que Flask soit prêt
-                    echo "Waiting for Flask..."
+                    # Attendre
                     sleep 10
                     
-                    # Vérifier
-                    curl -I http://localhost:5000 || echo "Flask not ready"
+                    echo "=== Flask logs ==="
+                    cat flask.log
                 '''
             }
         }
@@ -172,16 +172,15 @@ pipeline {
                 sh '''
                     docker pull ghcr.io/zaproxy/zaproxy:stable
                     
-                    # Fix permissions
                     docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
                     
-                    # Run ZAP on the same network
+                    # Use host.docker.internal to reach Jenkins container
                     docker run --rm \
-                        --network zap-test-network \
+                        --add-host=host.docker.internal:host-gateway \
                         -v $(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
-                        -t http://flask-test-app:5000 \
+                        -t http://host.docker.internal:5000 \
                         -r zap-report.html \
                         -J zap-report.json || true
                     
