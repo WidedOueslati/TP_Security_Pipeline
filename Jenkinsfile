@@ -139,47 +139,29 @@ pipeline {
             }
         }
 
-       stage('Deploy Temporary App') {
+        stage('Deploy Temporary App') {
             steps {
                 echo 'Déploiement de l\'application Flask pour le scan DAST...'
                 sh '''
-                    # Activer l'environnement
-                    . venv/bin/activate
+                    # Créer un réseau Docker
+                    docker network create zap-test-network || true
                     
-                    # Créer un script Python temporaire
-                    cat > run_flask.py << 'EOF'
-        from app import app
-        if __name__ == '__main__':
-            app.run(host='0.0.0.0', port=5000, debug=False)
-        EOF
+                    # Construire l'image Flask si pas déjà fait
+                    docker build -t flask-app:test .
                     
-                    # Lancer Flask en arrière-plan
-                    nohup python run_flask.py > flask.log 2>&1 &
-                    
-                    # Sauvegarder le PID
-                    echo $! > flask.pid
+                    # Lancer Flask dans un conteneur
+                    docker run -d \
+                        --name flask-test-app \
+                        --network zap-test-network \
+                        -p 5000:5000 \
+                        flask-app:test
                     
                     # Attendre que Flask soit prêt
-                    echo "Waiting for Flask to start..."
-                    sleep 5
+                    echo "Waiting for Flask..."
+                    sleep 10
                     
-                    for i in {1..30}; do
-                        if curl -s http://127.0.0.1:5000 > /dev/null 2>&1; then
-                            echo "Flask is ready!"
-                            
-                            # Vérifier via l'IP du conteneur
-                            JENKINS_IP=$(hostname -I | awk '{print $1}')
-                            echo "Container IP: $JENKINS_IP"
-                            curl -I http://${JENKINS_IP}:5000 || echo "Warning: not accessible via container IP"
-                            break
-                        fi
-                        echo "Attempt $i..."
-                        sleep 2
-                    done
-                    
-                    # Vérifier les logs
-                    echo "=== Flask startup logs ==="
-                    cat flask.log
+                    # Vérifier
+                    curl -I http://localhost:5000 || echo "Flask not ready"
                 '''
             }
         }
@@ -189,41 +171,26 @@ pipeline {
                 echo 'Running OWASP ZAP Baseline Scan...'
                 sh '''
                     docker pull ghcr.io/zaproxy/zaproxy:stable
-
-                    # Fix workspace permissions
-                    docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
-
-                    # Obtenir l'IP du gateway Docker (l'hôte Jenkins)
-                    DOCKER_GATEWAY=$(docker network inspect bridge --format='{{range .IPAM.Config}}{{.Gateway}}{{end}}')
-                    echo "Docker gateway IP: $DOCKER_GATEWAY"
                     
-                    # Alternative: utiliser l'IP du conteneur Jenkins directement
-                    # Si Jenkins tourne dans Docker, trouver son IP
-                    JENKINS_CONTAINER_IP=$(hostname -I | awk '{print $1}')
-                    echo "Jenkins IP: $JENKINS_CONTAINER_IP"
-
-                    # Run ZAP targeting Jenkins container IP
+                    # Fix permissions
+                    docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
+                    
+                    # Run ZAP on the same network
                     docker run --rm \
+                        --network zap-test-network \
                         -v $(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
-                        -t http://${JENKINS_CONTAINER_IP}:5000 \
+                        -t http://flask-test-app:5000 \
                         -r zap-report.html \
                         -J zap-report.json || true
-
-                    # Verify reports
-                    ls -lh zap-report.html zap-report.json || true
                     
-                    if [ -f flask.log ]; then
-                        echo "=== Flask Logs ==="
-                        tail -50 flask.log
-                    fi
+                    ls -lh zap-report.html zap-report.json || true
                 '''
             }
             post {
                 always {
                     archiveArtifacts artifacts: 'zap-report.html, zap-report.json', allowEmptyArchive: true
-                    sh 'docker network rm zap-network || true'
                 }
             }
         }
@@ -231,10 +198,9 @@ pipeline {
         stage('Stop Temporary App') {
             steps {
                 sh '''
-                    if [ -f flask.pid ]; then
-                        kill $(cat flask.pid)
-                        rm flask.pid
-                    fi
+                    docker stop flask-test-app || true
+                    docker rm flask-test-app || true
+                    docker network rm zap-test-network || true
                 '''
             }
         }
