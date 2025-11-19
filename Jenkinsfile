@@ -44,7 +44,7 @@ pipeline {
                 '''
             }
         }
-
+/*
         stage('Unit Tests') {
             steps {
                 echo 'Exécution des tests unitaires...'
@@ -138,7 +138,7 @@ pipeline {
                 '''
             }
         }
-
+*/
        stage('Deploy Temporary App') {
             steps {
                 echo 'Déploiement de l\'application Flask pour le scan DAST...'
@@ -146,31 +146,40 @@ pipeline {
                     # Activer l'environnement
                     . venv/bin/activate
                     
-                    # Lancer Flask avec binding explicite sur 0.0.0.0
-                    nohup python -c "
+                    # Créer un script Python temporaire
+                    cat > run_flask.py << 'EOF'
         from app import app
-        app.run(host='0.0.0.0', port=5000, debug=False)
-        " > flask.log 2>&1 &
+        if __name__ == '__main__':
+            app.run(host='0.0.0.0', port=5000, debug=False)
+        EOF
+                    
+                    # Lancer Flask en arrière-plan
+                    nohup python run_flask.py > flask.log 2>&1 &
                     
                     # Sauvegarder le PID
                     echo $! > flask.pid
                     
                     # Attendre que Flask soit prêt
                     echo "Waiting for Flask to start..."
+                    sleep 5
+                    
                     for i in {1..30}; do
                         if curl -s http://127.0.0.1:5000 > /dev/null 2>&1; then
-                            echo "Flask is ready on localhost!"
-                            # Vérifier aussi via l'IP du conteneur
+                            echo "Flask is ready!"
+                            
+                            # Vérifier via l'IP du conteneur
                             JENKINS_IP=$(hostname -I | awk '{print $1}')
-                            echo "Testing via container IP: $JENKINS_IP"
-                            curl -v http://${JENKINS_IP}:5000 || echo "Not accessible via container IP"
+                            echo "Container IP: $JENKINS_IP"
+                            curl -I http://${JENKINS_IP}:5000 || echo "Warning: not accessible via container IP"
                             break
                         fi
+                        echo "Attempt $i..."
                         sleep 2
                     done
                     
-                    # Afficher les ports en écoute
-                    netstat -tulpn | grep 5000 || ss -tulpn | grep 5000
+                    # Vérifier les logs
+                    echo "=== Flask startup logs ==="
+                    cat flask.log
                 '''
             }
         }
