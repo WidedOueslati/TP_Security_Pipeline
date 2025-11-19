@@ -44,7 +44,7 @@ pipeline {
                 '''
             }
         }
-/*
+
         stage('Unit Tests') {
             steps {
                 echo 'Exécution des tests unitaires...'
@@ -138,7 +138,7 @@ pipeline {
                 '''
             }
         }
-*/
+
        stage('Deploy Temporary App') {
             steps {
                 echo 'Déploiement de l\'application Flask pour le scan DAST...'
