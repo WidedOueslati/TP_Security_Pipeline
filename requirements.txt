@@ -6,3 +6,6 @@ requests==2.31.0
 
 # Dépendance vulnérable intentionnelle pour SCA
 urllib3==1.26.5
+Flask==0.12.2          
+Jinja2==2.10           
+Requests==2.19.1
