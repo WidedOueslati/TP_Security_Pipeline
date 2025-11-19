@@ -147,7 +147,7 @@ pipeline {
                     . venv/bin/activate
                     
                     # Lancer Flask en arrière-plan
-                    nohup python app.py &
+                    nohup python app.py --host=0.0.0.0 --port=5000 &
                     
                     # Sauvegarder le PID pour arrêter après
                     echo $! > flask.pid
@@ -162,22 +162,20 @@ pipeline {
             steps {
                 echo 'Running OWASP ZAP Baseline Scan...'
                 sh '''
-                    # Fix permissions so ZAP can write reports
-                    chown -R 1000:1000 . || true
-
-                    # Pull image
                     docker pull ghcr.io/zaproxy/zaproxy:stable
 
-                    # Run ZAP against Flask app — IMPORTANT: use host.docker.internal
+                    # Fix workspace permissions
+                    docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
+
+                    # Run ZAP – connect to host bridge IP 172.17.0.1
                     docker run --rm \
                         -v $(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
-                        -t http://host.docker.internal:5000 \
+                        -t http://172.17.0.1:5000 \
                         -r zap-report.html \
                         -J zap-report.json || true
 
-                    # Show results if created
                     ls -lh zap-report.html zap-report.json || true
                 '''
             }
