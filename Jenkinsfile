@@ -23,7 +23,6 @@ pipeline {
                     python3 -m venv venv
                     . venv/bin/activate
                     
-                    snyk auth $SNYK_TOKEN
                     pip install --upgrade pip
                     pip install -r requirements.txt
                     pip install bandit     # installe Bandit 
@@ -72,10 +71,12 @@ pipeline {
         stage('SCA Scan (Snyk)') {
             steps {
                 echo 'Lancement Snyk (génère Snyk-report.json)...'
+                withCredentials([string(credentialsId: 'SNYK_TOKEN', variable: 'SNYK_TOKEN')]){
                 sh '''
                     set +e
                     . venv/bin/activate
-
+                    # Authenticate Snyk
+                    snyk auth $SNYK_TOKEN
                     # Analyse SCA : sortie JSON dans un fichier
                     snyk test --severity-threshold=high --json > snyk-report.json 2>/dev/null
                     SNYK_EXIT=$?
@@ -84,6 +85,7 @@ pipeline {
 
                     set -e
                 '''
+                }
             }
             post {
                 always {
