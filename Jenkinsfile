@@ -162,14 +162,22 @@ pipeline {
             steps {
                 echo 'Running OWASP ZAP Baseline Scan...'
                 sh '''
+                    # Fix permissions so ZAP can write reports
+                    chown -R 1000:1000 . || true
+
+                    # Pull image
                     docker pull ghcr.io/zaproxy/zaproxy:stable
 
-                    docker run --rm -v $(pwd):/zap/wrk/:rw ghcr.io/zaproxy/zaproxy:stable \
+                    # Run ZAP against Flask app — IMPORTANT: use host.docker.internal
+                    docker run --rm \
+                        -v $(pwd):/zap/wrk/:rw \
+                        ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
-                        -t http://127.0.0.1:5000 \
+                        -t http://host.docker.internal:5000 \
                         -r zap-report.html \
                         -J zap-report.json || true
 
+                    # Show results if created
                     ls -lh zap-report.html zap-report.json || true
                 '''
             }
