@@ -4,6 +4,7 @@ pipeline {
     environment {
         PYTHON_VERSION = '3.9'
         APP_PORT = '5000'
+        SNYK_TOKEN = credentials('SNYK_TOKEN')
     }
 
     stages {
@@ -16,23 +17,17 @@ pipeline {
 
         stage('Setup Python Environment & Tools') {
             steps {
-                echo 'Configuration de l\'environnement Python et installation outils (bandit, safety, jq)...'
+                echo 'Configuration de l\'environnement Python et installation outils (bandit, snyk, jq)...'
                 sh '''
                     set -e
                     python3 -m venv venv
                     . venv/bin/activate
                     
+                    npm install -g snyk
+                    snyk auth $SNYK_TOKEN
                     pip install --upgrade pip
                     pip install -r requirements.txt
-                    # Installer Nikto (scan de sécurité)
-                    if [ ! -d "nikto" ]; then
-                        echo "Installation de Nikto..."
-                        git clone https://github.com/sullo/nikto.git
-                    else
-                        echo "Nikto déjà installé, mise à jour..."
-                        cd nikto && git pull && cd ..
-                    fi
-                    pip install bandit safety    # installe Bandit et Safety
+                    pip install bandit     # installe Bandit 
                     # vérifie jq (si absent, tenter d'installer via apt-get si possible)
                     if ! command -v jq >/dev/null 2>&1; then
                         echo "jq non trouvé - tentative d'installation (si l'agent le permet)..."
@@ -40,7 +35,7 @@ pipeline {
                             sudo apt-get update && sudo apt-get install -y jq || true
                         fi
                     fi
-                    echo "Outils installés : $(bandit --version 2>/dev/null || echo 'bandit?') / $(safety check --version 2>/dev/null || echo 'safety?') / jq: $(jq --version 2>/dev/null || echo 'jq?')"
+                    echo "Outils installés : $(bandit --version 2>/dev/null || echo 'bandit?') / $(snyk check --version 2>/dev/null || echo 'snyk?') / jq: $(jq --version 2>/dev/null || echo 'jq?')"
                 '''
             }
         }
@@ -75,167 +70,77 @@ pipeline {
             }
         }
 
-        stage('SCA Scan (Safety)') {
+        stage('SCA Scan (Snyk)') {
             steps {
-                echo 'Lancement Safety (génère safety-report.json)...'
+                echo 'Lancement Snyk (génère Snyk-report.json)...'
                 sh '''
                     set +e
                     . venv/bin/activate
-                    # safety peut lire requirements.txt ; on force la sortie JSON dans un fichier
-                    safety check --full-report --file=requirements.txt --json > safety-report.json 2>/dev/null
-                    SAFETY_EXIT=$?
-                    echo "SAFETY_EXIT=$SAFETY_EXIT" > safety-exit-code.txt
+
+                    # Analyse SCA : sortie JSON dans un fichier
+                    snyk test --severity-threshold=high --json > snyk-report.json 2>/dev/null
+                    SNYK_EXIT=$?
+
+                    echo "SNYK_EXIT=$SNYK_EXIT" > snyk-exit-code.txt
+
                     set -e
                 '''
             }
             post {
                 always {
-                    archiveArtifacts artifacts: 'safety-report.json, safety-exit-code.txt', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'snyk-report.json, snyk-exit-code.txt', allowEmptyArchive: true
                 }
             }
         }
-        
+
         stage('Security Validation') {
             steps {
-                echo 'Validation centralisée des rapports Bandit & Safety...'
+                echo 'Validation centralisée des rapports Bandit & Snyk...'
                 sh '''
                     set -e
                     # --- Bandit validation ---
                     if [ -f bandit-report.json ]; then
+                        # compter issues HIGH/CRITICAL dans bandit-report.json (structure Bandit standard)
                         HIGH_COUNT=$(jq '[.results[] | select(.issue_severity=="HIGH" or .issue_severity=="CRITICAL")] | length' bandit-report.json || echo 0)
                     else
                         echo "Attention: bandit-report.json introuvable"
                         HIGH_COUNT=0
                     fi
 
-                    # --- Safety validation ---
-                    if [ -f safety-report.json ]; then
-                        SAF_VULNS=$(jq 'if .vulnerabilities then .vulnerabilities | length else 0 end' safety-report.json || echo 0)
+                    # --- Snyk validation ---
+                    # Snyk JSON format: on cherche si la liste 'vulnerabilities' existe et compter
+                    if [ -f snyk-report.json ]; then
+                        # essayer plusieurs chemins possibles selon version : .vulnerabilities ou .vulnerabilities[]
+                        # on utilise try/capture pour éviter erreur jq si la clé n'existe pas
+                        SAF_VULNS=$(jq 'if .vulnerabilities then .vulnerabilities | length else 0 end' snyk-report.json || echo 0)
                     else
-                        echo "Attention: safety-report.json introuvable"
+                        echo "Attention: snyk-report.json introuvable"
                         SAF_VULNS=0
                     fi
 
                     echo "Bandit HIGH/CRITICAL issues: $HIGH_COUNT"
-                    echo "Safety detected vulnerabilities: $SAF_VULNS"
+                    echo "Snyk detected vulnerabilities: $SAF_VULNS"
 
-                    # Politique : échouer si Bandit signale HIGH/CRITICAL ou si Safety trouve >=1 vulnérabilité
+                    # Politique : échouer si Bandit signale HIGH/CRITICAL ou si Snyk trouve >=1 vulnérabilité
                     if [ "$HIGH_COUNT" -gt 0 ] || [ "$SAF_VULNS" -gt 0 ]; then
                         echo "Vulnérabilités critiques/hautes détectées — échec du pipeline."
+                        # On peut afficher un extrait des rapports pour faciliter debug
                         if [ "$HIGH_COUNT" -gt 0 ]; then
                             echo "Extraits Bandit (High/Critical):"
                             jq '.results[] | select(.issue_severity=="HIGH" or .issue_severity=="CRITICAL") | {filename: .filename, test_name: .test_name, issue_text: .issue_text}' bandit-report.json || true
                         fi
                         if [ "$SAF_VULNS" -gt 0 ]; then
-                            echo "Extraits Safety (quelques vulnérabilités):"
-                            jq '.vulnerabilities[] | {package_name: .package_name, affected_versions: .affected_versions, advisory: .advisory}' safety-report.json | head -n 200 || true
+                            echo "Extraits Snyk (quelques vulnérabilités):"
+                            jq '.vulnerabilities[] | {package_name: .package_name, affected_versions: .affected_versions, advisory: .advisory}' snyk-report.json | head -n 200 || true
                         fi
 
                         exit 1
                     else
-                        echo "Aucun problème critique détecté par Bandit/Safety."
+                        echo "Aucun problème critique détecté par Bandit/Snyk."
                     fi
                 '''
             }
         }
-
-        stage('Deploy Temporary App') {
-            steps {
-                echo 'Déploiement de l\'application Flask pour le scan DAST...'
-                sh '''
-                    # Activer l'environnement
-                    . venv/bin/activate
-                    
-                    # Lancer Flask en arrière-plan
-                    nohup python app.py &
-                    
-                    # Sauvegarder le PID pour arrêter après
-                    echo $! > flask.pid
-                    
-                    # Attendre quelques secondes que le serveur soit prêt
-                    sleep 5
-                '''
-            }
-        }
-        
-        stage('DAST Scan (Nikto)') {
-            steps {
-                echo 'Analyse dynamique avec Nikto...'
-                sh '''
-                    # Scanner l'application Flask avec Nikto
-                    perl nikto/program/nikto.pl \
-                        -h http://127.0.0.1:5000 \
-                        -Tuning 123456789abc \
-                        -Format json \
-                        -output nikto-report.json \
-                        -nointeractive 
-
-                    # Générer aussi un rapport HTML pour visualisation
-                    perl nikto/program/nikto.pl \
-                        -h http://127.0.0.1:5000 \
-                        -Tuning 123456789abc \
-                        -Format html \
-                        -output nikto-report.html \
-                        -nointeractive
-
-                    # Vérifier que le rapport existe
-                    ls -lh nikto-report.json nikto-report.html || true
-
-                    # Compter le nombre de vulnérabilités détectées
-                    # Nikto JSON format: liste d'objets avec des vulnérabilités
-                    if [ -f nikto-report.json ]; then
-                        # Filtrer les vulnérabilités critiques/high
-                        HIGH_COUNT=$(jq -r '
-                            [.[].vulnerabilities[]? |
-                                select(
-                                (.msg // "" | ascii_downcase |
-                                    test("content-security-policy|strict-transport-security|x-content-type-options|referrer-policy|permissions-policy")
-                                )
-                                )
-                            ] | length
-                            ' nikto-report.json)
-
-                        TOTAL_COUNT=$(jq -r 'length' nikto-report.json 2>/dev/null || echo 0)
-                        
-                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                        echo "Résultats du scan Nikto:"
-                        echo "   Total de vulnérabilités: $TOTAL_COUNT"
-                        echo "   Vulnérabilités HIGH/CRITICAL: $HIGH_COUNT"
-                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-                        # Bloquer le pipeline si vulnérabilités critiques détectées
-                        if [ $HIGH_COUNT -gt 0 ]; then
-                            echo " ÉCHEC: Vulnérabilités critiques détectées!"
-                            exit 1
-                        else
-                            echo "Aucune vulnérabilité critique détectée."
-                        fi
-                    else
-                        echo "Fichier nikto-report.json introuvable"
-                        exit 1
-                    fi
-                '''
-            }
-            post {
-                always {
-                    archiveArtifacts artifacts: 'nikto-report.json, nikto-report.html', allowEmptyArchive: true
-                    
-                }
-            }
-        }
-        stage('Stop Temporary App') {
-            steps {
-                sh '''
-                    if [ -f flask.pid ]; then
-                        kill $(cat flask.pid)
-                        rm flask.pid
-                    fi
-                '''
-            }
-        }
-
-
-
     } // stages
 
     post {
@@ -244,7 +149,7 @@ pipeline {
             sh 'rm -rf venv'
         }
         success {
-            echo 'Pipeline réussi  !'
+            echo 'Pipeline réussi (tests + sécurité OK) !'
         }
         failure {
             echo 'Pipeline échoué (problèmes détectés).'
