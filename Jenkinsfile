@@ -139,32 +139,35 @@ pipeline {
             }
         }
 
-        stage('Deploy Temporary App') {
+       stage('Deploy Temporary App') {
             steps {
                 echo 'Déploiement de l\'application Flask pour le scan DAST...'
                 sh '''
+                    # Créer un réseau Docker personnalisé
+                    docker network create zap-network || true
+                    
                     # Activer l'environnement
                     . venv/bin/activate
                     
-                    # Lancer Flask en arrière-plan avec binding sur toutes les interfaces
-                    nohup python app.py --host=0.0.0.0 --port=5000 > flask.log 2>&1 &
+                    # Lancer Flask en arrière-plan
+                    nohup python app.py > flask.log 2>&1 &
                     
-                    # Sauvegarder le PID pour arrêter après
+                    # Sauvegarder le PID
                     echo $! > flask.pid
                     
-                    # Attendre que le serveur soit vraiment prêt
+                    # Attendre que Flask soit prêt
                     echo "Waiting for Flask to start..."
                     for i in {1..30}; do
-                        if curl -s http://localhost:5000 > /dev/null 2>&1; then
+                        if curl -s http://127.0.0.1:5000 > /dev/null 2>&1; then
                             echo "Flask is ready!"
                             break
                         fi
-                        echo "Attempt $i: Flask not ready yet..."
                         sleep 2
                     done
                     
-                    # Vérifier que Flask est accessible
-                    curl -I http://localhost:5000 || echo "Warning: Flask may not be accessible"
+                    # Vérifier la route racine
+                    echo "Testing Flask root endpoint:"
+                    curl -v http://127.0.0.1:5000 || echo "No root route found"
                 '''
             }
         }
@@ -178,29 +181,37 @@ pipeline {
                     # Fix workspace permissions
                     docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
 
-                    # Run ZAP using host network mode to access Flask on localhost
+                    # Obtenir l'IP du gateway Docker (l'hôte Jenkins)
+                    DOCKER_GATEWAY=$(docker network inspect bridge --format='{{range .IPAM.Config}}{{.Gateway}}{{end}}')
+                    echo "Docker gateway IP: $DOCKER_GATEWAY"
+                    
+                    # Alternative: utiliser l'IP du conteneur Jenkins directement
+                    # Si Jenkins tourne dans Docker, trouver son IP
+                    JENKINS_CONTAINER_IP=$(hostname -I | awk '{print $1}')
+                    echo "Jenkins IP: $JENKINS_CONTAINER_IP"
+
+                    # Run ZAP targeting Jenkins container IP
                     docker run --rm \
-                        --network host \
                         -v $(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
-                        -t http://localhost:5000 \
+                        -t http://${JENKINS_CONTAINER_IP}:5000 \
                         -r zap-report.html \
                         -J zap-report.json || true
 
-                    # Verify reports were created
+                    # Verify reports
                     ls -lh zap-report.html zap-report.json || true
                     
-                    # Show Flask logs for debugging
                     if [ -f flask.log ]; then
                         echo "=== Flask Logs ==="
-                        cat flask.log
+                        tail -50 flask.log
                     fi
                 '''
             }
             post {
                 always {
                     archiveArtifacts artifacts: 'zap-report.html, zap-report.json', allowEmptyArchive: true
+                    sh 'docker network rm zap-network || true'
                 }
             }
         }

@@ -4,6 +4,10 @@ import os
 
 app = Flask(__name__)
 
+@app.route('/')
+def home():
+    return 'Hello, World!'
+
 @app.after_request
 def add_security_headers(response):
     response.headers['Strict-Transport-Security'] = 'max-age=63072000; includeSubDomains; preload'
@@ -35,6 +39,7 @@ def init_db():
     cursor.execute("INSERT INTO users VALUES (2, 'user', 'user123', 'user@example.com', 'user')")
     conn.commit()
     conn.close()
+
 
 # Route de santé
 @app.route('/health', methods=['GET'])
