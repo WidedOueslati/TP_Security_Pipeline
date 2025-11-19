@@ -23,7 +23,6 @@ pipeline {
                     python3 -m venv venv
                     . venv/bin/activate
                     
-                    npm install -g snyk
                     snyk auth $SNYK_TOKEN
                     pip install --upgrade pip
                     pip install -r requirements.txt
