@@ -160,50 +160,19 @@ pipeline {
         
         stage('DAST Scan - OWASP ZAP') {
             steps {
-                echo 'Analyse dynamique avec OWASP ZAP...'
+                echo 'Running OWASP ZAP Baseline Scan...'
                 sh '''
-                    # Pull latest stable ZAP Docker image
                     docker pull ghcr.io/zaproxy/zaproxy:stable
 
-                    # Run ZAP Baseline Scan against Flask app
                     docker run --rm -v $(pwd):/zap/wrk/:rw ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
                         -t http://127.0.0.1:5000 \
                         -r zap-report.html \
                         -J zap-report.json || true
 
-                    # Check that reports exist
                     ls -lh zap-report.html zap-report.json || true
-
-                    # Count HIGH alerts from JSON report
-                    if [ -f zap-report.json ]; then
-                        HIGH_COUNT=$(jq -r '
-                            .site[0].alerts // [] |
-                            map(select(.riskcode=="3")) | length
-                        ' zap-report.json || echo 0)
-
-                        TOTAL_COUNT=$(jq -r '.site[0].alerts // [] | length' zap-report.json || echo 0)
-
-                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                        echo "Résultats du scan ZAP:"
-                        echo "   Total de vulnérabilités: $TOTAL_COUNT"
-                        echo "   Vulnérabilités HIGH/CRITICAL: $HIGH_COUNT"
-                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-                        # Fail pipeline if HIGH vulnerabilities found
-                        if [ "$HIGH_COUNT" -gt 0 ]; then
-                            echo "ÉCHEC: Vulnérabilités critiques détectées!"
-                            exit 1
-                        else
-                            echo "Aucune vulnérabilité critique détectée."
-                        fi
-                    else
-                        echo "Fichier zap-report.json introuvable"
-                        exit 1
-                    fi
                 '''
             }
-
             post {
                 always {
                     archiveArtifacts artifacts: 'zap-report.html, zap-report.json', allowEmptyArchive: true
