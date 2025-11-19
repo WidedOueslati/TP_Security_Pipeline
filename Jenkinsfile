@@ -143,14 +143,14 @@ pipeline {
             steps {
                 echo 'Déploiement de l\'application Flask pour le scan DAST...'
                 sh '''
-                    # Créer un réseau Docker personnalisé
-                    docker network create zap-network || true
-                    
                     # Activer l'environnement
                     . venv/bin/activate
                     
-                    # Lancer Flask en arrière-plan
-                    nohup python app.py > flask.log 2>&1 &
+                    # Lancer Flask avec binding explicite sur 0.0.0.0
+                    nohup python -c "
+        from app import app
+        app.run(host='0.0.0.0', port=5000, debug=False)
+        " > flask.log 2>&1 &
                     
                     # Sauvegarder le PID
                     echo $! > flask.pid
@@ -159,15 +159,18 @@ pipeline {
                     echo "Waiting for Flask to start..."
                     for i in {1..30}; do
                         if curl -s http://127.0.0.1:5000 > /dev/null 2>&1; then
-                            echo "Flask is ready!"
+                            echo "Flask is ready on localhost!"
+                            # Vérifier aussi via l'IP du conteneur
+                            JENKINS_IP=$(hostname -I | awk '{print $1}')
+                            echo "Testing via container IP: $JENKINS_IP"
+                            curl -v http://${JENKINS_IP}:5000 || echo "Not accessible via container IP"
                             break
                         fi
                         sleep 2
                     done
                     
-                    # Vérifier la route racine
-                    echo "Testing Flask root endpoint:"
-                    curl -v http://127.0.0.1:5000 || echo "No root route found"
+                    # Afficher les ports en écoute
+                    netstat -tulpn | grep 5000 || ss -tulpn | grep 5000
                 '''
             }
         }
