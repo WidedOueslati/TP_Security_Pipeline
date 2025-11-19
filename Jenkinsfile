@@ -146,18 +146,29 @@ pipeline {
                     # Activer l'environnement
                     . venv/bin/activate
                     
-                    # Lancer Flask en arrière-plan
-                    nohup python app.py --host=0.0.0.0 --port=5000 &
+                    # Lancer Flask en arrière-plan avec binding sur toutes les interfaces
+                    nohup python app.py --host=0.0.0.0 --port=5000 > flask.log 2>&1 &
                     
                     # Sauvegarder le PID pour arrêter après
                     echo $! > flask.pid
                     
-                    # Attendre quelques secondes que le serveur soit prêt
-                    sleep 5
+                    # Attendre que le serveur soit vraiment prêt
+                    echo "Waiting for Flask to start..."
+                    for i in {1..30}; do
+                        if curl -s http://localhost:5000 > /dev/null 2>&1; then
+                            echo "Flask is ready!"
+                            break
+                        fi
+                        echo "Attempt $i: Flask not ready yet..."
+                        sleep 2
+                    done
+                    
+                    # Vérifier que Flask est accessible
+                    curl -I http://localhost:5000 || echo "Warning: Flask may not be accessible"
                 '''
             }
         }
-        
+
         stage('DAST Scan - OWASP ZAP') {
             steps {
                 echo 'Running OWASP ZAP Baseline Scan...'
@@ -167,16 +178,24 @@ pipeline {
                     # Fix workspace permissions
                     docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
 
-                    # Run ZAP – connect to host bridge IP 172.17.0.1
+                    # Run ZAP using host network mode to access Flask on localhost
                     docker run --rm \
+                        --network host \
                         -v $(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
-                        -t http://172.17.0.1:5000 \
+                        -t http://localhost:5000 \
                         -r zap-report.html \
                         -J zap-report.json || true
 
+                    # Verify reports were created
                     ls -lh zap-report.html zap-report.json || true
+                    
+                    # Show Flask logs for debugging
+                    if [ -f flask.log ]; then
+                        echo "=== Flask Logs ==="
+                        cat flask.log
+                    fi
                 '''
             }
             post {
@@ -185,7 +204,6 @@ pipeline {
                 }
             }
         }
-
 
         stage('Stop Temporary App') {
             steps {
