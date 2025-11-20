@@ -177,34 +177,67 @@ pipeline {
         stage('DAST Scan - OWASP ZAP') {
             steps {
                 echo 'Running OWASP ZAP Baseline Scan...'
-                sh '''
-
-                    set +e   # don't fail the step immediately on non-zero exit
+                sh sh '''
+                    set +e  # Don't fail immediately on non-zero exit
+                    
                     WORKDIR=/zap/wrk
-
+                    
                     # Fix permissions in the workspace
                     docker run --rm -v $(pwd):$WORKDIR alpine sh -c "chown -R 1000:1000 $WORKDIR"
+                    
                     # Use container name for ZAP target
-                    FLASK_HOST=jenkins2   # Replace with your Jenkins container name on the bridge network
-
+                    FLASK_HOST=jenkins2  # Replace with your Jenkins container name on the bridge network
+                    
+                    # Create the workspace directory inside container if it doesn't exist
+                    mkdir -p $(pwd)/zap-reports
+                    
                     docker run --rm --network devsecops-net \
                         -v $(pwd):$WORKDIR:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
                         -t http://$FLASK_HOST:5000 \
-                        -r $WORKDIR/zap-report.html \
-                        -J $WORKDIR/zap-report.json
-
+                        -r $WORKDIR/zap-reports/zap-report.html \
+                        -J $WORKDIR/zap-reports/zap-report.json \
+                        -x $WORKDIR/zap-reports/zap-report.xml
+                    
                     ZAP_EXIT=$?
-                    echo "ZAP exit code: $ZAP_EXIT" > zap-exit-code.txt
-
-                    # Optional: preview first few lines of the reports
-                    head -n 20 zap-report.html
-                    cat zap-report.json
-
-                    set -e   # restore default fail-on-error
-                    # Verify reports
-                    ls -lh zap-report.html zap-report.json || true
+                    echo "ZAP exit code: $ZAP_EXIT" > zap-reports/zap-exit-code.txt
+                    
+                    # Check if reports were generated
+                    if [ -f "zap-reports/zap-report.html" ]; then
+                        echo "HTML report generated successfully"
+                        head -n 20 zap-reports/zap-report.html
+                    else
+                        echo "WARNING: HTML report was not generated"
+                    fi
+                    
+                    if [ -f "zap-reports/zap-report.json" ]; then
+                        echo "JSON report generated successfully"
+                        # Show just the first few lines of JSON to verify structure
+                        head -n 10 zap-reports/zap-report.json
+                    else
+                        echo "WARNING: JSON report was not generated"
+                    fi
+                    
+                    set -e  # Restore default fail-on-error
+                    
+                    # Verify reports with better error handling
+                    echo "Checking generated files:"
+                    ls -lh zap-reports/ || true
+                    echo "File sizes:"
+                    du -sh zap-reports/* 2>/dev/null || echo "No reports found in zap-reports directory"
+                    
+                    # ZAP often exits with non-zero for warnings, which might be acceptable
+                    if [ $ZAP_EXIT -eq 0 ]; then
+                        echo "ZAP scan completed successfully"
+                    elif [ $ZAP_EXIT -eq 1 ]; then
+                        echo "ZAP scan completed with warnings"
+                    elif [ $ZAP_EXIT -eq 2 ]; then
+                        echo "ZAP scan failed with errors"
+                        exit 1
+                    else
+                        echo "ZAP scan completed with unknown exit code: $ZAP_EXIT"
+                    fi
                 '''
             }
             post {
