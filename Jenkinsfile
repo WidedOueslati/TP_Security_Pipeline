@@ -178,67 +178,42 @@ pipeline {
             steps {
                 echo 'Running OWASP ZAP Baseline Scan...'
                 sh '''
-                    set +e  # Don't fail immediately on non-zero exit
+                    set +e
                     
                     WORKDIR=/zap/wrk
+                    HOST_WORKDIR=$(pwd)
                     
-                    # Fix permissions in the workspace
-                    docker run --rm -v $(pwd):$WORKDIR alpine sh -c "chown -R 1000:1000 $WORKDIR"
+                    # Fix permissions
+                    docker run --rm -v $HOST_WORKDIR:$WORKDIR alpine sh -c "chown -R 1000:1000 $WORKDIR"
                     
-                    # Use container name for ZAP target
-                    FLASK_HOST=jenkins2  # Replace with your Jenkins container name on the bridge network
+                    FLASK_HOST=jenkins2
                     
-                    # Create the workspace directory inside container if it doesn't exist
-                    mkdir -p $(pwd)/zap-reports
-                    
+                    # Run ZAP with reports in workspace root
                     docker run --rm --network devsecops-net \
-                        -v $(pwd):$WORKDIR:rw \
+                        -v $HOST_WORKDIR:$WORKDIR:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
                         -t http://$FLASK_HOST:5000 \
-                        -r $WORKDIR/zap-reports/zap-report.html \
-                        -J $WORKDIR/zap-reports/zap-report.json \
-                        -x $WORKDIR/zap-reports/zap-report.xml
+                        -r $WORKDIR/zap-report.html \
+                        -J $WORKDIR/zap-report.json
                     
                     ZAP_EXIT=$?
-                    echo "ZAP exit code: $ZAP_EXIT" > zap-reports/zap-exit-code.txt
+                    echo "ZAP exit code: $ZAP_EXIT" > zap-exit-code.txt
                     
-                    # Check if reports were generated
-                    if [ -f "zap-reports/zap-report.html" ]; then
-                        echo "HTML report generated successfully"
-                        head -n 20 zap-reports/zap-report.html
-                    else
-                        echo "WARNING: HTML report was not generated"
-                    fi
+                    # Check reports directly in workspace
+                    echo "Generated files:"
+                    ls -lh zap-report.* 2>/dev/null || echo "No report files found"
                     
-                    if [ -f "zap-reports/zap-report.json" ]; then
-                        echo "JSON report generated successfully"
-                        # Show just the first few lines of JSON to verify structure
-                        head -n 10 zap-reports/zap-report.json
-                    else
-                        echo "WARNING: JSON report was not generated"
-                    fi
+                    set -e
                     
-                    set -e  # Restore default fail-on-error
-                    
-                    # Verify reports with better error handling
-                    echo "Checking generated files:"
-                    ls -lh zap-reports/ || true
-                    echo "File sizes:"
-                    du -sh zap-reports/* 2>/dev/null || echo "No reports found in zap-reports directory"
-                    
-                    # ZAP often exits with non-zero for warnings, which might be acceptable
-                    if [ $ZAP_EXIT -eq 0 ]; then
-                        echo "ZAP scan completed successfully"
-                    elif [ $ZAP_EXIT -eq 1 ]; then
-                        echo "ZAP scan completed with warnings"
-                    elif [ $ZAP_EXIT -eq 2 ]; then
-                        echo "ZAP scan failed with errors"
-                        exit 1
-                    else
-                        echo "ZAP scan completed with unknown exit code: $ZAP_EXIT"
+                    # Handle exit code
+                    if [ $ZAP_EXIT -eq 2 ]; then
+                        echo "ZAP scan failed - check target accessibility and network"
+                        # Test if target is reachable
+                        docker run --rm --network devsecops-net alpine nc -z $FLASK_HOST 5000 && echo "Target is reachable" || echo "Target is NOT reachable"
                     fi
                 '''
+    
             }
             post {
                 always {
