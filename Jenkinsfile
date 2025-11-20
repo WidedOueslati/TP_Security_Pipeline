@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         PYTHON_VERSION = '3.9'
-        APP_PORT = '5000'
+        APP_PORT = '50000'
     }
 
     stages {
@@ -150,7 +150,7 @@ pipeline {
                     cat > run_flask.py << 'EOF'
         from app import app
         if __name__ == '__main__':
-            app.run(host='0.0.0.0', port=5000, debug=False)
+            app.run(host='0.0.0.0', port=50000, debug=False)
         EOF
                     
                     # Lancer Flask
@@ -179,14 +179,14 @@ pipeline {
                     echo "Using gateway IP: $GATEWAY_IP"
                     
                     # Test Flask accessibility first
-                    docker run --rm alpine sh -c "apk add curl && curl -I http://${GATEWAY_IP}:5000" || echo "Flask not accessible"
+                    docker run --rm alpine sh -c "apk add curl && curl -I http://${GATEWAY_IP}:50000" || echo "Flask not accessible"
                     
                     # Run ZAP with timeout
                     timeout 120 docker run --rm \
                         -v $(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
-                        -t http://${GATEWAY_IP}:5000 \
+                        -t http://${GATEWAY_IP}:50000 \
                         -r zap-report.html \
                         -J zap-report.json || true
                     
