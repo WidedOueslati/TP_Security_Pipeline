@@ -177,7 +177,7 @@ pipeline {
         stage('DAST Scan - OWASP ZAP') {
             steps {
                 echo 'Running OWASP ZAP Baseline Scan...'
-                sh sh '''
+                sh '''
                     set +e  # Don't fail immediately on non-zero exit
                     
                     WORKDIR=/zap/wrk
