@@ -180,28 +180,20 @@ pipeline {
                 echo 'Running OWASP ZAP Baseline Scan...'
                 sh '''
                     docker pull ghcr.io/zaproxy/zaproxy:stable
-                    
+
+                    # Fix workspace permissions
                     docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
-                    
-                    # Get Jenkins container IP
-                    JENKINS_IP=$(hostname -I | awk '{print $1}')
-                    echo "Jenkins container IP: $JENKINS_IP"
-                    
-                    # Test from Alpine container if Flask is reachable
-                    docker run --rm alpine sh -c "
-                        apk add --no-cache curl && 
-                        curl -v --max-time 10 http://${JENKINS_IP}:5000
-                    " || echo "Flask not reachable from other containers"
-                    
-                    # Run ZAP anyway with timeout
-                    timeout 180 docker run --rm \
+
+                    # Run ZAP in the same Docker network
+                    docker run --rm \
+                        --network devsecops-net \
                         -v $(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
-                        -t http://${JENKINS_IP}:5000 \
+                        -t http://jenkins2:5000 \
                         -r zap-report.html \
                         -J zap-report.json || true
-                    
+
                     ls -lh zap-report.html zap-report.json || true
                 '''
             }
@@ -211,6 +203,7 @@ pipeline {
                 }
             }
         }
+
         stage('Stop Temporary App') {
             steps {
                 sh '''
