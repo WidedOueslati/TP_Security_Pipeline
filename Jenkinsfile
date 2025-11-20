@@ -181,17 +181,20 @@ pipeline {
                     set +e
                     
                     FLASK_HOST=jenkins2
+                    docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
+
                     
                     # Run ZAP and let it write to current directory directly
                     # Use host networking or bind mounts without path complications
                     docker run --rm --network devsecops-net \
-                        -v $(pwd):/zap/wrk:rw \
-                        -w /zap/wrk \
-                        ghcr.io/zaproxy/zaproxy:stable \
-                        zap-full-scan.py\
-                        -t http://$FLASK_HOST:5000 \
-                        -r zap-report.html \
-                        -J zap-report.json
+                    -v $(pwd):/zap/wrk \
+                    -w /zap/wrk \
+                    ghcr.io/zaproxy/zaproxy:stable \
+                    zap-full-scan.py \
+                    -t http://$FLASK_HOST:5000 \
+                    -r /zap/wrk/zap-report.html \
+                    -J /zap/wrk/zap-report.json
+
                     
                     ZAP_EXIT=$?
                     echo "ZAP exit code: $ZAP_EXIT"
