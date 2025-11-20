@@ -141,35 +141,34 @@ pipeline {
 
         stage('Deploy Temporary App') {
             steps {
-                echo 'Déploiement de l\'application Flask pour le scan DAST...'
+                echo "Déploiement de l'application Flask pour le scan DAST..."
                 sh '''
-                    # Activer l'environnement
+                    # Activate Python venv
                     . venv/bin/activate
                     
-                    # Créer un script Python
+                    # Create a small Python runner for Flask
                     cat > run_flask.py << 'EOF'
         from app import app
-        import socket
         if __name__ == '__main__':
-            # Bind to 0.0.0.0 to be accessible from outside
+            # Bind to 0.0.0.0 so other containers on the network can reach it
             app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
         EOF
-                    
-                    # Lancer Flask
+
+                    # Launch Flask in background
                     nohup python run_flask.py > flask.log 2>&1 &
                     echo $! > flask.pid
-                    
-                    # Attendre
+
+                    # Wait for Flask to be ready
                     sleep 10
-                    
-                    # Vérifier les logs
+
+                    # Check logs briefly
                     echo "=== Flask logs ==="
-                    cat flask.log
-                    
-                    # Test local
-                    curl -I http://127.0.0.1:5000 || echo "Not ready on localhost"
-                    
-                    # Get all IPs this container has
+                    tail -n 20 flask.log
+
+                    # Optional: test container-local access
+                    curl -I http://127.0.0.1:5000 || echo "Flask not ready on localhost"
+
+                    # Show container IPs (for ZAP to connect)
                     hostname -I
                 '''
             }
@@ -182,10 +181,9 @@ pipeline {
                     # Fix workspace permissions
                     docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
 
-                    # Get Jenkins container IP on devsecops-net
-                    FLASK_HOST=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' jenkins2)
+                    # Use container name for ZAP target
+                    FLASK_HOST=jenkins2   # Replace with your Jenkins container name on the bridge network
 
-                    # Run ZAP
                     docker run --rm --network devsecops-net \
                         -v $(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
@@ -205,13 +203,13 @@ pipeline {
             }
         }
 
-
-
         stage('Stop Temporary App') {
             steps {
                 sh '''
-                    [ -f flask.pid ] && kill $(cat flask.pid) && rm flask.pid || true
-                    [ -f socat.pid ] && kill $(cat socat.pid) && rm socat.pid || true
+                    if [ -f flask.pid ]; then
+                        kill $(cat flask.pid)
+                        rm flask.pid
+                    fi
                 '''
             }
         }
