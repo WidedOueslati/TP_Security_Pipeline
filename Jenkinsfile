@@ -180,38 +180,27 @@ pipeline {
                 sh '''
                     set +e
                     
-                    WORKDIR=/zap/wrk
-                    HOST_WORKDIR=$(pwd)
-                    
-                    # Fix permissions
-                    docker run --rm -v $HOST_WORKDIR:$WORKDIR alpine sh -c "chown -R 1000:1000 $WORKDIR"
-                    
                     FLASK_HOST=jenkins2
                     
-                    # Run ZAP with reports in workspace root
+                    # Run ZAP and let it write to current directory directly
+                    # Use host networking or bind mounts without path complications
                     docker run --rm --network devsecops-net \
-                        -v $HOST_WORKDIR:$WORKDIR:rw \
+                        -v $(pwd):/zap/wrk:rw \
+                        -w /zap/wrk \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
                         -t http://$FLASK_HOST:5000 \
-                        -r $WORKDIR/zap-report.html \
-                        -J $WORKDIR/zap-report.json
+                        -r zap-report.html \
+                        -J zap-report.json
                     
                     ZAP_EXIT=$?
-                    echo "ZAP exit code: $ZAP_EXIT" > zap-exit-code.txt
+                    echo "ZAP exit code: $ZAP_EXIT"
                     
-                    # Check reports directly in workspace
+                    # Verify files
                     echo "Generated files:"
-                    ls -lh zap-report.* 2>/dev/null || echo "No report files found"
+                    ls -l zap-report.* 2>/dev/null || echo "No reports found"
                     
                     set -e
-                    
-                    # Handle exit code
-                    if [ $ZAP_EXIT -eq 2 ]; then
-                        echo "ZAP scan failed - check target accessibility and network"
-                        # Test if target is reachable
-                        docker run --rm --network devsecops-net alpine nc -z $FLASK_HOST 5000 && echo "Target is reachable" || echo "Target is NOT reachable"
-                    fi
                 '''
     
             }
