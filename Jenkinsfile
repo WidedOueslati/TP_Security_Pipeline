@@ -149,7 +149,9 @@ pipeline {
                     # Créer un script Python
                     cat > run_flask.py << 'EOF'
         from app import app
+        import socket
         if __name__ == '__main__':
+            # Bind to 0.0.0.0 to be accessible from outside
             app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
         EOF
                     
@@ -157,16 +159,18 @@ pipeline {
                     nohup python run_flask.py > flask.log 2>&1 &
                     echo $! > flask.pid
                     
-                    # Attendre et vérifier
+                    # Attendre
                     sleep 10
-                    curl -I http://127.0.0.1:5000 || echo "Flask startup failed"
                     
-                    # Exposer Flask via socat sur toutes les interfaces
-                    nohup socat TCP-LISTEN:5001,fork,reuseaddr TCP:127.0.0.1:5000 &
-                    echo $! > socat.pid
+                    # Vérifier les logs
+                    echo "=== Flask logs ==="
+                    cat flask.log
                     
-                    sleep 2
-                    echo "Flask accessible via port 5001"
+                    # Test local
+                    curl -I http://127.0.0.1:5000 || echo "Not ready on localhost"
+                    
+                    # Get all IPs this container has
+                    hostname -I
                 '''
             }
         }
@@ -175,22 +179,26 @@ pipeline {
             steps {
                 echo 'Running OWASP ZAP Baseline Scan...'
                 sh '''
-                    # Install socat in Jenkins if needed
-                    apt-get update && apt-get install -y socat || yum install -y socat || true
-                    
                     docker pull ghcr.io/zaproxy/zaproxy:stable
                     
                     docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
                     
-                    GATEWAY_IP=$(docker network inspect bridge --format='{{(index .IPAM.Config 0).Gateway}}')
-                    echo "Gateway IP: $GATEWAY_IP"
+                    # Get Jenkins container IP
+                    JENKINS_IP=$(hostname -I | awk '{print $1}')
+                    echo "Jenkins container IP: $JENKINS_IP"
                     
-                    # Test with increased timeout
+                    # Test from Alpine container if Flask is reachable
+                    docker run --rm alpine sh -c "
+                        apk add --no-cache curl && 
+                        curl -v --max-time 10 http://${JENKINS_IP}:5000
+                    " || echo "Flask not reachable from other containers"
+                    
+                    # Run ZAP anyway with timeout
                     timeout 180 docker run --rm \
                         -v $(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
-                        -t http://${GATEWAY_IP}:5001 \
+                        -t http://${JENKINS_IP}:5000 \
                         -r zap-report.html \
                         -J zap-report.json || true
                     
@@ -203,7 +211,6 @@ pipeline {
                 }
             }
         }
-
         stage('Stop Temporary App') {
             steps {
                 sh '''
