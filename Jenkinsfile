@@ -180,19 +180,21 @@ pipeline {
                 sh '''
 
                     set +e   # don't fail the step immediately on non-zero exit
-                    # Fix workspace permissions
-                    docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
+                    WORKDIR=/zap/wrk
 
+                    # Fix permissions in the workspace
+                    docker run --rm -v $(pwd):$WORKDIR alpine sh -c "chown -R 1000:1000 $WORKDIR"
                     # Use container name for ZAP target
                     FLASK_HOST=jenkins2   # Replace with your Jenkins container name on the bridge network
 
                     docker run --rm --network devsecops-net \
-                        -v $(pwd):/zap/wrk/:rw \
+                        -v $(pwd):$WORKDIR:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
                         -t http://$FLASK_HOST:5000 \
-                        -r zap-report.html \
-                        -J zap-report.json
+                        -r $WORKDIR/zap-report.html \
+                        -J $WORKDIR/zap-report.json
+
                     ZAP_EXIT=$?
                     echo "ZAP exit code: $ZAP_EXIT" > zap-exit-code.txt
 
