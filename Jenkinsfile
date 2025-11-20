@@ -174,13 +174,19 @@ pipeline {
                     
                     docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
                     
-                    # Use host.docker.internal to reach Jenkins container
-                    docker run --rm \
-                        --add-host=host.docker.internal:host-gateway \
+                    # Get the actual Docker bridge gateway IP
+                    GATEWAY_IP=$(docker network inspect bridge --format='{{(index .IPAM.Config 0).Gateway}}')
+                    echo "Using gateway IP: $GATEWAY_IP"
+                    
+                    # Test Flask accessibility first
+                    docker run --rm alpine sh -c "apk add curl && curl -I http://${GATEWAY_IP}:5000" || echo "Flask not accessible"
+                    
+                    # Run ZAP with timeout
+                    timeout 120 docker run --rm \
                         -v $(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
-                        -t http://host.docker.internal:5000 \
+                        -t http://${GATEWAY_IP}:5000 \
                         -r zap-report.html \
                         -J zap-report.json || true
                     
