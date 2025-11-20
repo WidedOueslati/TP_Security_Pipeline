@@ -188,7 +188,7 @@ pipeline {
                         -v $(pwd):/zap/wrk:rw \
                         -w /zap/wrk \
                         ghcr.io/zaproxy/zaproxy:stable \
-                        zap-baseline.py \
+                        zap-full-scan.py\
                         -t http://$FLASK_HOST:5000 \
                         -r zap-report.html \
                         -J zap-report.json
