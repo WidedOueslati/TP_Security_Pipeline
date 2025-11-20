@@ -189,8 +189,8 @@ pipeline {
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
                         -t http://$FLASK_HOST:5000 \
-                        -r zap-report.html \
-                        -J zap-report.json
+                        -r /zap/wrk/zap-report.html \
+                        -J /zap/wrk/zap-report.json
 
                     # Verify reports
                     ls -lh zap-report.html zap-report.json || true
