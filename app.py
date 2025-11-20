@@ -46,33 +46,26 @@ def init_db():
 def health():
     return jsonify({"status": "healthy", "version": "1.0"}), 200
 
-# VULNÉRABILITÉ 1 : SQL Injection
+# VULNÉRABILITÉ : SQL Injection volontairement détectable
 @app.route('/user/<user_id>', methods=['GET'])
 def get_user(user_id):
-    """Route vulnérable à l'injection SQL"""
+    """Route vulnérable à l'injection SQL (détectable par ZAP)"""
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
-    
-    # DANGER : Concaténation directe sans paramètres préparés
-    query = f"SELECT * FROM users WHERE id = {user_id}"
-    
+
+    # Force SQL injection vulnerability + error visibility
+    query = "SELECT id, username, email FROM users WHERE id = " + user_id
+
     try:
         cursor.execute(query)
-        user = cursor.fetchone()
+        result = cursor.fetchall()
         conn.close()
-        
-        if user:
-            return jsonify({
-                "id": user[0],
-                "username": user[1],
-                "password": user[2],  # VULNÉRABILITÉ : Exposition du mot de passe
-                "email": user[3],
-                "role": user[4]
-            }), 200
-        else:
-            return jsonify({"error": "User not found"}), 404
+
+        # Behavior change will be detected by ZAP
+        return jsonify({"query_executed": query, "result": result})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        # ZAP LOVES visible SQL error messages
+        return jsonify({"sql_error": str(e), "query_attempted": query}), 500
 
 # VULNÉRABILITÉ 2 : Exposition de données sensibles
 @app.route('/users', methods=['GET'])
