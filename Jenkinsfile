@@ -179,17 +179,17 @@ pipeline {
             steps {
                 echo 'Running OWASP ZAP Baseline Scan...'
                 sh '''
-                    docker pull ghcr.io/zaproxy/zaproxy:stable
-
                     # Fix workspace permissions
                     docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
 
-                    # Run ZAP in the same Docker network
-                    curl -L https://github.com/zaproxy/zaproxy/releases/download/v2.13.0/ZAP_2_13_0_Linux.tar.gz -o /tmp/zap.tar.gz
-tar -xzf /tmp/zap.tar.gz -C /opt
-/opt/ZAP_2_13_0/zap.sh -daemon -port 5001
-/opt/ZAP_2_13_0/zap.sh -cmd -quickurl http://127.0.0.1:5000 -quickout zap-report.html
-
+                    # Run ZAP baseline scan using Docker
+                    docker run --rm \
+                        -v $(pwd):/zap/wrk/:rw \
+                        ghcr.io/zaproxy/zaproxy:stable \
+                        zap-baseline.py \
+                        -t http://127.0.0.1:5000 \
+                        -r zap-report.html \
+                        -J zap-report.json || true
 
                     ls -lh zap-report.html zap-report.json || true
                 '''
@@ -200,6 +200,7 @@ tar -xzf /tmp/zap.tar.gz -C /opt
                 }
             }
         }
+
 
         stage('Stop Temporary App') {
             steps {
