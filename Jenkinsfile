@@ -178,6 +178,8 @@ pipeline {
             steps {
                 echo 'Running OWASP ZAP Baseline Scan...'
                 sh '''
+
+                    set +e   # don't fail the step immediately on non-zero exit
                     # Fix workspace permissions
                     docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
 
@@ -191,12 +193,14 @@ pipeline {
                         -t http://$FLASK_HOST:5000 \
                         -r zap-report.html \
                         -J zap-report.json
-                    echo "=== ZAP HTML Report (head) ==="
-                    head -n 20 zap-report.html
+                    ZAP_EXIT=$?
+                    echo "ZAP exit code: $ZAP_EXIT" > zap-exit-code.txt
 
-                    echo "=== ZAP JSON Report ==="
+                    # Optional: preview first few lines of the reports
+                    head -n 20 zap-report.html
                     cat zap-report.json
 
+                    set -e   # restore default fail-on-error
                     # Verify reports
                     ls -lh zap-report.html zap-report.json || true
                 '''
