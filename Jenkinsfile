@@ -182,14 +182,11 @@ pipeline {
                     # Fix workspace permissions
                     docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
 
-                    # Run ZAP baseline scan using Docker
-                    docker run --rm \
-                        -v $(pwd):/zap/wrk/:rw \
-                        ghcr.io/zaproxy/zaproxy:stable \
-                        zap-baseline.py \
-                        -t http://127.0.0.1:5000 \
-                        -r zap-report.html \
-                        -J zap-report.json || true
+                    docker run --rm --network host \
+    -v $(pwd):/zap/wrk/:rw \
+    ghcr.io/zaproxy/zaproxy:stable \
+    zap-baseline.py -t http://127.0.0.1:5000 -r zap-report.html -J zap-report.json
+
 
                     ls -lh zap-report.html zap-report.json || true
                 '''
