@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         PYTHON_VERSION = '3.9'
-        APP_PORT = '50000'
+        APP_PORT = '5000'
     }
 
     stages {
@@ -146,22 +146,27 @@ pipeline {
                     # Activer l'environnement
                     . venv/bin/activate
                     
-                    # Créer un script Python temporaire
+                    # Créer un script Python
                     cat > run_flask.py << 'EOF'
         from app import app
         if __name__ == '__main__':
-            app.run(host='0.0.0.0', port=50000, debug=False)
+            app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
         EOF
                     
                     # Lancer Flask
                     nohup python run_flask.py > flask.log 2>&1 &
                     echo $! > flask.pid
                     
-                    # Attendre
+                    # Attendre et vérifier
                     sleep 10
+                    curl -I http://127.0.0.1:5000 || echo "Flask startup failed"
                     
-                    echo "=== Flask logs ==="
-                    cat flask.log
+                    # Exposer Flask via socat sur toutes les interfaces
+                    nohup socat TCP-LISTEN:5001,fork,reuseaddr TCP:127.0.0.1:5000 &
+                    echo $! > socat.pid
+                    
+                    sleep 2
+                    echo "Flask accessible via port 5001"
                 '''
             }
         }
@@ -170,23 +175,22 @@ pipeline {
             steps {
                 echo 'Running OWASP ZAP Baseline Scan...'
                 sh '''
+                    # Install socat in Jenkins if needed
+                    apt-get update && apt-get install -y socat || yum install -y socat || true
+                    
                     docker pull ghcr.io/zaproxy/zaproxy:stable
                     
                     docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
                     
-                    # Get the actual Docker bridge gateway IP
                     GATEWAY_IP=$(docker network inspect bridge --format='{{(index .IPAM.Config 0).Gateway}}')
-                    echo "Using gateway IP: $GATEWAY_IP"
+                    echo "Gateway IP: $GATEWAY_IP"
                     
-                    # Test Flask accessibility first
-                    docker run --rm alpine sh -c "apk add curl && curl -I http://${GATEWAY_IP}:50000" || echo "Flask not accessible"
-                    
-                    # Run ZAP with timeout
-                    timeout 120 docker run --rm \
+                    # Test with increased timeout
+                    timeout 180 docker run --rm \
                         -v $(pwd):/zap/wrk/:rw \
                         ghcr.io/zaproxy/zaproxy:stable \
                         zap-baseline.py \
-                        -t http://${GATEWAY_IP}:50000 \
+                        -t http://${GATEWAY_IP}:5001 \
                         -r zap-report.html \
                         -J zap-report.json || true
                     
@@ -203,13 +207,11 @@ pipeline {
         stage('Stop Temporary App') {
             steps {
                 sh '''
-                    docker stop flask-test-app || true
-                    docker rm flask-test-app || true
-                    docker network rm zap-test-network || true
+                    [ -f flask.pid ] && kill $(cat flask.pid) && rm flask.pid || true
+                    [ -f socat.pid ] && kill $(cat socat.pid) && rm socat.pid || true
                 '''
             }
         }
-
 
 
     } // stages

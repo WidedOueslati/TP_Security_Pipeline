@@ -149,4 +149,4 @@ def calculate():
 if __name__ == '__main__':
     init_db()
     # DANGER : Debug activé expose des informations sensibles
-    app.run(host='0.0.0.0', port=50000, debug=False)
+    app.run(host='0.0.0.0', port=5000, debug=False)
