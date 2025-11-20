@@ -182,12 +182,19 @@ pipeline {
                     # Fix workspace permissions
                     docker run --rm -v $(pwd):/wrk alpine sh -c "chown -R 1000:1000 /wrk"
 
-                    docker run --rm --network host \
-    -v $(pwd):/zap/wrk/:rw \
-    ghcr.io/zaproxy/zaproxy:stable \
-    zap-baseline.py -t http://127.0.0.1:5000 -r zap-report.html -J zap-report.json
+                    # Get Jenkins container IP on devsecops-net
+                    FLASK_HOST=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' jenkins2)
 
+                    # Run ZAP
+                    docker run --rm --network devsecops-net \
+                        -v $(pwd):/zap/wrk/:rw \
+                        ghcr.io/zaproxy/zaproxy:stable \
+                        zap-baseline.py \
+                        -t http://$FLASK_HOST:5000 \
+                        -r zap-report.html \
+                        -J zap-report.json
 
+                    # Verify reports
                     ls -lh zap-report.html zap-report.json || true
                 '''
             }
@@ -197,6 +204,7 @@ pipeline {
                 }
             }
         }
+
 
 
         stage('Stop Temporary App') {
